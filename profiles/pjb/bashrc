@@ -49,6 +49,17 @@ alias gc='git commit'
 alias gp='git push'
 alias gl='git log --oneline --graph --decorate'
 
+# Allow terminal apps to use system clipboard via OSC52
+if command -v xclip >/dev/null; then
+  alias pbcopy='xclip -selection clipboard'
+  alias pbpaste='xclip -selection clipboard -o'
+elif command -v xsel >/dev/null; then
+  alias pbcopy='xsel --clipboard --input'
+  alias pbpaste='xsel --clipboard --output'
+  # Enable bracketed paste mode in bash
+  bind 'set enable-bracketed-paste on'
+fi
+
 # --- Editor ---
 if command -v vim >/dev/null 2>&1; then
   export EDITOR=vim
