@@ -1,0 +1,11 @@
+{
+    "remote.containers.defaultAction": "openInNewWindow",
+    "window.commandCenter": true,
+    "workbench.colorTheme": "Default High Contrast",
+    "remote.SSH.remotePlatform": {
+        "dev0.braam.io": "linux"
+    },
+    "makefile.configureOnOpen": true,
+    "files.autoSave": "afterDelay",
+    "dev.containers.defaultFeatures": {},
+}

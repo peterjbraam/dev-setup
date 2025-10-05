@@ -48,7 +48,7 @@ alias ga='git add'
 alias gc='git commit'
 alias gp='git push'
 alias gl='git log --oneline --graph --decorate'
-
+alias clear='tput reset'
 # Allow terminal apps to use system clipboard via OSC52
 if command -v xclip >/dev/null; then
   alias pbcopy='xclip -selection clipboard'

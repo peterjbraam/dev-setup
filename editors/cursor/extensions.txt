@@ -1,0 +1,11 @@
+antfu.browse-lite
+anysphere.remote-containers
+anysphere.remote-ssh
+arrterian.nix-env-selector
+golang.go
+jnoortheen.nix-ide
+mkhl.direnv
+ms-azuretools.vscode-containers
+ms-azuretools.vscode-docker
+ms-vscode.makefile-tools
+pinage404.nix-extension-pack

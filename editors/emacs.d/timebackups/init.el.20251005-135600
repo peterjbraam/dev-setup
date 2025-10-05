@@ -98,10 +98,6 @@
 ;; Terminal and mouse
 ;; -------------------------------------------------------------------
 
-(when (equal (getenv "TERM") "dumb")
-  (message "Warning: TERM=dumb — setting TERM to xterm-256color for better Emacs terminal support")
-  (setenv "TERM" "xterm-256color"))
-
 (unless (display-graphic-p)
   (xterm-mouse-mode 1)
   (mouse-wheel-mode 1)

@@ -95,26 +95,16 @@
                                          (my-smart-backup)))))))
 
 ;; -------------------------------------------------------------------
-;; Terminal and mouse
+;; System clipboard integration (mac GUI/TTY, iPad SSH via OSC52)
 ;; -------------------------------------------------------------------
+;; Terminal & mouse
+(xterm-mouse-mode 1)
+(setq system-uses-terminfo t) ;; keep tmux happy
 
-(when (equal (getenv "TERM") "dumb")
-  (message "Warning: TERM=dumb — setting TERM to xterm-256color for better Emacs terminal support")
-  (setenv "TERM" "xterm-256color"))
+(setq select-enable-clipboard t
+      select-enable-primary t)
 
-(unless (display-graphic-p)
-  (xterm-mouse-mode 1)
-  (mouse-wheel-mode 1)
-  (setq mouse-wheel-scroll-amount '(1 ((shift) . 5)))
-  (setq mouse-wheel-progressive-speed nil)
-  (setq mouse-wheel-follow-mouse t)
-  (global-set-key [mouse-4] (lambda () (interactive) (scroll-down 1)))
-  (global-set-key [mouse-5] (lambda () (interactive) (scroll-up 1))))
-
-;; -------------------------------------------------------------------
-;; Cross platform copy paste
-;; -------------------------------------------------------------------
-
+;; Cross-platform clipboard integration for terminal Emacs
 (unless (display-graphic-p)
   (cond
    ;; macOS

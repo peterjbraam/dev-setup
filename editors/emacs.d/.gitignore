@@ -1,0 +1,13 @@
+this:
+
+# Package manager directories
+/elpa/
+/straight/
+
+# Transient state from Magit and other packages
+/transient/
+
+# Other generated files and cache
+/auto-save-list/
+/history
+*.elc
