@@ -29,12 +29,38 @@
 (column-number-mode 1)
 (setq-default indent-tabs-mode nil tab-width 4)
 
+;; ================================================
+;; Region handi tools
+;; ================================================
+
+
+(defun kill-to-end-of-buffer ()
+  "Kill from point to the end of the buffer."
+  (interactive)
+  (kill-region (point) (point-max)))
+
+(global-set-key (kbd "C-c k") 'kill-to-end-of-buffer)
+
+(defun copy-whole-buffer ()
+  "Copy the entire buffer to the kill ring."
+  (interactive)
+  (kill-new (buffer-substring-no-properties (point-min) (point-max)))
+  (message "Entire buffer copied"))
+
+(global-set-key (kbd "C-c a") 'copy-whole-buffer)
+
+;; ===================================
+;; THEME
+;; ===================================
+
 (when (not (display-graphic-p))
   ;; only set this theme for terminal emacs
   (load-theme 'wombat t))
 
-
+;; ===================================
 ;; auto saving
+;; ===================================
+
 (setq auto-save-visited-interval 2)
 (auto-save-visited-mode 1)
 (setq make-backup-files nil create-lockfiles nil)
@@ -98,98 +124,97 @@
 ;; Terminal and mouse
 ;; -------------------------------------------------------------------
 
-(when (equal (getenv "TERM") "dumb")
-  (message "Warning: TERM=dumb — setting TERM to xterm-256color for better Emacs terminal support")
-  (setenv "TERM" "xterm-256color"))
+(setenv "TERM" "xterm-256color")
 
-(unless (display-graphic-p)
-  (xterm-mouse-mode 1)
-  (mouse-wheel-mode 1)
-  (setq mouse-wheel-scroll-amount '(1 ((shift) . 5)))
-  (setq mouse-wheel-progressive-speed nil)
-  (setq mouse-wheel-follow-mouse t)
+;; Enable mouse interaction in all environments
+(xterm-mouse-mode 1) ; necessary for terminals
+(mouse-wheel-mode 1)
+
+;; Smooth scrolling
+(setq mouse-wheel-scroll-amount '(1 ((shift) . 5)))
+(setq mouse-wheel-progressive-speed nil)
+(setq mouse-wheel-follow-mouse t)
+
+;; Scroll with mouse buttons in terminal
+(when (not (display-graphic-p))
   (global-set-key [mouse-4] (lambda () (interactive) (scroll-down 1)))
   (global-set-key [mouse-5] (lambda () (interactive) (scroll-up 1))))
+
+;; Allow mouse click to set point (cursor)
+(global-set-key [mouse-1] 'mouse-set-point)
+(global-set-key [down-mouse-1] 'mouse-drag-region)
 
 ;; -------------------------------------------------------------------
 ;; Cross platform copy paste
 ;; -------------------------------------------------------------------
+;; Keep Emacs kill-ring separate from system clipboard
+(setq select-enable-clipboard nil)
+(setq select-enable-primary nil)
+(setq save-interprogram-paste-before-kill t)
+(setq interprogram-cut-function nil)
+(setq interprogram-paste-function nil)
 
-(unless (display-graphic-p)
-  (cond
-   ;; macOS
-   ((and (eq system-type 'darwin)
-         (executable-find "pbcopy")
-         (executable-find "pbpaste"))
-    (setq interprogram-cut-function
-          (lambda (text &optional _)
-            (let ((p (start-process "pbcopy" nil "pbcopy")))
-              (process-send-string p text)
-              (process-send-eof p))))
+
+(defun pb/osc52-copy (text &optional _push)
+  "Send TEXT to system clipboard via OSC 52 escape sequence."
+  (when (and text (stringp text))
+    (send-string-to-terminal
+     (concat "\e]52;c;" (base64-encode-string text t) "\a"))))
+
+(setq interprogram-cut-function #'pb/osc52-copy)
+
+;; -------------------------------------------------------------------
+;; Delayed clipboard sync after region selection (mouse or keyboard)
+;; -------------------------------------------------------------------
+
+(defvar pb/osc52-idle-timer nil
+  "Timer to delay clipboard sync after region selection.")
+
+(defun pb/osc52-copy (text &optional _push)
+  "Send TEXT to system clipboard via OSC 52 escape sequence."
+  (when (and text (stringp text))
+    (send-string-to-terminal
+     (concat "\e]52;c;" (base64-encode-string text t) "\a"))))
+
+(setq interprogram-cut-function #'pb/osc52-copy)
+
+(defun pb/osc52-sync-if-region ()
+  "Copy region to kill ring and OSC 52 clipboard, if region is active and non-empty."
+  (when (use-region-p)
+    (let ((text (buffer-substring-no-properties (region-beginning) (region-end))))
+      (when (> (length text) 2)
+        (kill-new text)
+        (pb/osc52-copy text)
+        (message "✅ Region copied to kill ring and system clipboard")))))
+
+(defun pb/osc52-delay-sync ()
+  "Schedule delayed region sync after idle timeout."
+  (when pb/osc52-idle-timer
+    (cancel-timer pb/osc52-idle-timer))
+  (setq pb/osc52-idle-timer
+        (run-with-idle-timer 1.0 nil #'pb/osc52-sync-if-region)))
+
+(advice-add 'mouse-drag-region :after (lambda (&rest _) (pb/osc52-delay-sync)))
+(add-hook 'activate-mark-hook #'pb/osc52-delay-sync)
+(add-hook 'post-command-hook #'pb/osc52-delay-sync)
+
     (setq interprogram-paste-function
-          (lambda ()
-            (with-temp-buffer
-              (call-process "pbpaste" nil t)
-              (buffer-string)))))
+      (lambda ()
+        (with-temp-buffer
+          (call-process "pbpaste" nil t)
+          (let ((text (buffer-string)))
+            (unless (string= text (car kill-ring))
+              text)))))
 
-   ;; Windows
-   ((eq system-type 'windows-nt)
-    ;; Copy
-    (setq interprogram-cut-function
-          (lambda (text &optional _)
-            (with-temp-buffer
-              (insert text)
-              (call-process-region (point-min) (point-max)
-                                   "clip.exe" nil 0))))
-    ;; Paste
-    (setq interprogram-paste-function
-          (lambda ()
-            (with-temp-buffer
-              (call-process "powershell.exe" nil t nil
-                            "-Command" "Get-Clipboard")
-              (buffer-string)))))
+(defun pb/reset-mouse ()
+  "Toggle xterm-mouse-mode to reinitialize mouse handling."
+  (interactive)
+  (xterm-mouse-mode -1)
+  (xterm-mouse-mode 1)
+  (message "Mouse reset"))
+(global-set-key (kbd "C-c m") 'pb/reset-mouse)
 
-   ;; Wayland (Linux)
-   ((and (executable-find "wl-copy")
-         (executable-find "wl-paste"))
-    (setq interprogram-cut-function
-          (lambda (text &optional _)
-            (let ((p (start-process "wl-copy" nil "wl-copy" "--foreground" "--type" "text/plain")))
-              (process-send-string p text)
-              (process-send-eof p))))
-    (setq interprogram-paste-function
-          (lambda ()
-            (with-temp-buffer
-              (call-process "wl-paste" nil t nil "--no-newline")
-              (buffer-string)))))
-
-   ;; X11 (Linux)
-   ((executable-find "xclip")
-    (setq interprogram-cut-function
-          (lambda (text &optional _)
-            (let ((p (start-process "xclip" nil "xclip" "-selection" "clipboard")))
-              (process-send-string p text)
-              (process-send-eof p))))
-    (setq interprogram-paste-function
-          (lambda ()
-            (with-temp-buffer
-              (call-process "xclip" nil t nil "-selection" "clipboard" "-o")
-              (buffer-string)))))
-
-   ((executable-find "xsel")
-    (setq interprogram-cut-function
-          (lambda (text &optional _)
-            (let ((p (start-process "xsel" nil "xsel" "--clipboard" "--input")))
-              (process-send-string p text)
-              (process-send-eof p))))
-    (setq interprogram-paste-function
-          (lambda ()
-            (with-temp-buffer
-              (call-process "xsel" nil t nil "--clipboard" "--output")
-              (buffer-string)))))
-
-   (t
-    (message "No clipboard tool found (pbcopy, wl-copy, xclip, xsel, clip.exe, powershell.exe)"))))
+(global-set-key (kbd "<triple-mouse-1>") 'move-beginning-of-line)
 
 
 ;; Containers
@@ -307,7 +332,9 @@
 (use-package go-mode :mode "\\.go\\'")
 (use-package json-mode   :mode "\\.json\\'")
 (use-package yaml-mode   :mode "\\.ya?ml\\'")
-;; (use-package dockerfile-mode :mode "Dockerfile\\'")
+(use-package dockerfile-mode
+  :ensure t)
+(add-to-list 'auto-mode-alist '("\\.docker\\'" . dockerfile-mode))
 (use-package bazel
   :mode (("\\.bzl\\'" . bazel-mode)
          ("WORKSPACE\\'" . bazel-workspace-mode)

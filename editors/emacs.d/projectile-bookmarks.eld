@@ -1,1 +1,1 @@
-("~/dev-setup/")
+("~/s2/sst/" "~/dev-setup/")

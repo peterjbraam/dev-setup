@@ -11,3 +11,5 @@ this:
 /auto-save-list/
 /history
 *.elc
+.lsp-session*
+tramp
