@@ -1,7 +1,0 @@
-[user]
-	name = Peter Braam
-	email = peter@braam.io
-[safe]
-	directory = /mnt/hgfs/braam/s2/sst
-	directory = /mnt/hgfs/braam/dev-setup
-	directory = /mnt/hgfs/braam/dev-setup
