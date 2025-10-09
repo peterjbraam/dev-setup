@@ -129,30 +129,7 @@ fi
 [ "$OS" != "Darwin" ] && fc-cache -fv >/dev/null || true
 
 #----- Shell defaults
-if ! grep -q "dev-setup bootstrap" "$HOME/.bashrc" 2>/dev/null; then
-cat >> "$HOME/.bashrc" <<'EOF'
-# dev-setup bootstrap
-export PATH="$HOME/.local/bin:$PATH"
-[ -f ~/.bash_aliases ] && . ~/.bash_aliases
-export RIPGREP_CONFIG_PATH="$HOME/.ripgreprc"
-EOF
-fi
 
-cat > "$HOME/.bash_aliases" <<'EOF'
-alias ll='ls -alF'
-alias la='ls -A'
-alias l='ls -CF'
-alias gs='git status'
-alias gd='git diff'
-alias gl='git log --oneline --graph --decorate'
-EOF
-
-cat > "$HOME/.ripgreprc" <<'EOF'
---hidden
---glob=!node_modules
---glob=!.git
---smart-case
-EOF
 
 #----- Emacs config
 link "$REPO_DIR/emacs/.emacs.d" "$HOME/.emacs.d"
