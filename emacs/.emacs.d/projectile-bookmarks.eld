@@ -1,1 +1,1 @@
-("~/dev-setup/")
+("~/sw/dev-setup/" "~/sw/gitpm/" "~/sw/bpm/" "~/sw/tart/" "~/sw/runtime-smart/" "~/sw/runtime-smart-good/" "~/sw/runtime-tools/" "~/dev-setup/" "~/sw/sst-run/" "~/sw/sst-run/runvm-macos/" "~/ai/chat-processing/gemini/" "~/sw/vmcli/" "/opt/homebrew/" "~/sw/sst/" "~/s2/sst-run/" "~/s2/sst-run/VZRunner/" "~/sst/")

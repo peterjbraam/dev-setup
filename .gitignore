@@ -1,2 +1,6 @@
 **/.DS_Store
 editors/emacs.d/timebackups/*
+docs/*
+emacs/.emacs.d/.cache/*
+emacs/.emacs.d/.lsp-session-v1
+**/*~

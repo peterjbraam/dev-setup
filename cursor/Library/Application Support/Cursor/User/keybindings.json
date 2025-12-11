@@ -1,0 +1,40 @@
+[
+    {
+      "key": "f8",
+      "command": "editor.action.marker.next",
+      "when": "editorTextFocus"
+    },
+    {
+      "key": "shift+f8",
+      "command": "editor.action.marker.prev",
+      "when": "editorTextFocus"
+    },
+    { "key": "cmd+i", "command": "-composerMode.agent" },
+    { "key": "cmd+e", "command": "-composerMode.background" },
+    // Keep only core Emacs editing motions
+    { "key": "ctrl+a", "command": "cursorHome", "when": "textInputFocus" },
+    { "key": "ctrl+e", "command": "cursorEnd", "when": "textInputFocus" },
+    { "key": "ctrl+k", "command": "deleteAllRight", "when": "textInputFocus" },
+    { "key": "ctrl+y", "command": "editor.action.clipboardPasteAction", "when": "textInputFocus" },
+    { "key": "ctrl+b", "command": "cursorLeft", "when": "textInputFocus" },
+    { "key": "ctrl+f", "command": "cursorRight", "when": "textInputFocus" },
+      // 1) Unbind Cursor's single-stroke Cmd+K (shows "Edit code")
+      // Find the exact command id first (see tip). Common ids include:
+      // "cursor.editCode" or "editor.action.inlineChat.start"
+      { "key": "cmd+k", "command": "-cursor.editCode" },
+      // 2) Restore VS Code's ⌘K chord behaviors for marking/region
+      { "key": "cmd+k m", "command": "editor.action.setSelectionAnchor", "when": "textInputFocus" },
+      { "key": "cmd+k k", "command": "editor.action.selectFromAnchorToCursor", "when": "textInputFocus" },
+      { "key": "cmd+k cmd+x", "command": "editor.action.selectToPreviousFindMatch", "when": "textInputFocus" },
+      // 3) (Optional) Give "Edit code" a new shortcut so you don’t lose it
+      // Move it to Cmd+I (or anything you prefer)
+      {
+        "key": "cmd+i",
+        "command": "cursor.editCode",
+        "when": "editorTextFocus"
+      },
+      {
+        "key": "cmd+i",
+        "command": "composerMode.agent"
+      }
+]

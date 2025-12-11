@@ -53,4 +53,4 @@ nmap <Leader>p "+p
 vmap <Leader>p "+p
 
 " --- Colorscheme ---
-colorscheme desert      " built-in; pick another if you like
+colorscheme koehler

@@ -17,9 +17,9 @@ shopt -s globstar 2>/dev/null || true
 
 # --- Prompt (unified: user@host cwd $ or #) ---
 if [[ $EUID -eq 0 ]]; then
-  PS1='\[\e[1;32m\]\u@\h \[\e[1;34m\]\w \[\e[1;31m\]# \[\e[0m\] '
+  PS1='\[\e[1;32m\]\u@\h \[\e[1;34m\]\w \[\e[1;31m\]# \[\e[0m\]'
 else
-  PS1='\[\e[1;32m\]\u@\h \[\e[1;34m\]\w \[\e[1;31m\]$ \[\e[0m\] '
+  PS1='\[\e[1;32m\]\u@\h \[\e[1;34m\]\w \[\e[1;31m\]$ \[\e[0m\]'
 fi
 
 # --- Colors for ls ---
@@ -60,6 +60,7 @@ alias ga='git add'
 alias gc='git commit'
 alias gp='git push'
 alias gl='git log --oneline --graph --decorate'
+alias find='gfind'
 # Allow terminal apps to use system clipboard via OSC52
 if command -v xclip >/dev/null; then
   alias pbcopy='xclip -selection clipboard'
@@ -76,8 +77,6 @@ if command -v vim >/dev/null 2>&1; then
   export EDITOR=vim
 elif command -v vi >/dev/null 2>&1; then
   export EDITOR=vi
-elif command -v gvim >/dev/null 2>&1; then
-  export EDITOR=gvim
 fi
 
 # --- PATH setup ---
@@ -86,15 +85,21 @@ if [[ "$OSTYPE" == "linux-gnu"* ]]; then
   export PATH=$PATH:/usr/local/go/bin:$HOME/go/bin
   export GOPATH=$HOME/go
   export PATH=$PATH:$GOPATH/bin
+  export PATH=$PATH:~braam/scripts
   PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
 fi
 
 if [[ "$OSTYPE" == "darwin"* ]]; then
-  PATH="/opt/homebrew/opt/make/libexec/gnubin:$PATH"
-  export PATH=$PATH:$(go env GOPATH)/bin
-  alias patch='gpatch'
-  alias make=gmake
+export PATH="/opt/homebrew/opt/make/libexec/gnubin"
+export PATH="$PATH:/opt/homebrew/bin"
+export PATH="$PATH:/Users/braam/.nix-profile/bin:/nix/var/nix/profiles/default/bin"
+export PATH="$PATH:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+export PATH="$PATH:/Applications/VMware Fusion.app/Contents/Public"
+export PATH="$PATH:/Users/braam/go/bin"
 fi
+export PATH="$PATH:/Users/braam/sst/tools:/Users/braam/scripts"
+
+
 
 # --- Pager preference ---
 if command -v less >/dev/null 2>&1; then
@@ -139,3 +144,4 @@ if ! shopt -oq posix; then
     . /etc/bash_completion
   fi
 fi
+export HOMEBREW_NO_AUTO_UPDATE="1"

@@ -1,4 +1,5 @@
 {
+    "window.clickThroughInactive": true,
     "remote.containers.defaultAction": "openInNewWindow",
     "window.commandCenter": true,
     "workbench.colorTheme": "Default High Contrast",
@@ -6,6 +7,9 @@
         "dev0.braam.io": "linux"
     },
     "makefile.configureOnOpen": true,
-    "files.autoSave": "afterDelay",
     "dev.containers.defaultFeatures": {},
+    "files.associations": {
+            "*.docker": "dockerfile"
+        },
+        "files.autoSave": "afterDelay"
 }
