@@ -61,6 +61,7 @@ alias gc='git commit'
 alias gp='git push'
 alias gl='git log --oneline --graph --decorate'
 alias find='gfind'
+alias awk='gawk'
 # Allow terminal apps to use system clipboard via OSC52
 if command -v xclip >/dev/null; then
   alias pbcopy='xclip -selection clipboard'
@@ -96,6 +97,7 @@ export PATH="$PATH:/Users/braam/.nix-profile/bin:/nix/var/nix/profiles/default/b
 export PATH="$PATH:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 export PATH="$PATH:/Applications/VMware Fusion.app/Contents/Public"
 export PATH="$PATH:/Users/braam/go/bin"
+export PATH="$PATH:/opt/local/bin"
 fi
 export PATH="$PATH:/Users/braam/sst/tools:/Users/braam/scripts"
 
@@ -145,3 +147,8 @@ if ! shopt -oq posix; then
   fi
 fi
 export HOMEBREW_NO_AUTO_UPDATE="1"
+# Lima BEGIN
+# Make sure iptables and mount.fuse3 are available
+PATH="$PATH:/usr/sbin:/sbin"
+export PATH
+# Lima END

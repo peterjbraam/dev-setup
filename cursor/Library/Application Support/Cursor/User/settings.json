@@ -1,15 +1,44 @@
 {
     "window.clickThroughInactive": true,
-    "remote.containers.defaultAction": "openInNewWindow",
     "window.commandCenter": true,
-    "workbench.colorTheme": "Default High Contrast",
+  
+  
     "remote.SSH.remotePlatform": {
-        "dev0.braam.io": "linux"
+      "dev0.braam.io": "linux"
     },
     "makefile.configureOnOpen": true,
     "dev.containers.defaultFeatures": {},
+  
     "files.associations": {
-            "*.docker": "dockerfile"
-        },
-        "files.autoSave": "afterDelay"
-}
+      "*.docker": "dockerfile"
+    },
+    "files.autoSave": "afterDelay",
+    "git.openRepositoryInParentFolders": "always",
+    "terminal.integrated.enableMultiLinePasteWarning": "never",
+    "explorer.confirmDelete": false,
+    "explorer.confirmDragAndDrop": false,
+  
+    "editor.fontFamily": "JetBrains Mono",
+    "editor.fontWeight": "600",
+    "editor.fontSize": 14,
+    "editor.lineHeight": 20,
+    "editor.cursorStyle": "block",
+    "editor.cursorBlinking": "blink",
+    "editor.cursorSmoothCaretAnimation": "off",
+    "editor.smoothScrolling": false,
+  
+    "workbench.colorTheme": "Default Dark+",
+    "workbench.preferredHighContrastLightColorTheme": "Default Dark+",
+    "terminal.integrated.fontFamily": "JetBrains Mono Medium",
+    "terminal.integrated.fontWeight": "600",
+    "terminal.integrated.fontSize": 14,
+ 
+    "workbench.colorCustomizations": {
+      "editor.background": "#242424",
+      "editor.foreground": "#e8e8e8",
+      "editor.lineHighlightBackground": "#303030",
+      "editor.cursorStyle": "block",
+      "editor.cursorBlinking": "blink",  
+      "editorCursor.foreground": "#ff8800"
+    }
+  }
