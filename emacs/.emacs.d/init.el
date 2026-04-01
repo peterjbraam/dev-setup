@@ -467,12 +467,20 @@
 (add-hook 'kill-emacs-hook #'my/disable-process-query)
 
 (custom-set-faces
- ;; 1. The "Lazy" Matches (All other matches on screen) - Dark Blue + White Text
- '(lazy-highlight ((t (:background "#0000aa" :foreground "white" :weight bold))))
- ;; 2. The "Current" Match (The one you are on) - Dark Magenta + White Text
+ ;; custom-set-faces was added by Custom.
+ ;; If you edit it by hand, you could mess it up, so be careful.
+ ;; Your init file should contain only one such instance.
+ ;; If there is more than one, they won't work right.
+ '(consult-preview-match ((t (:inherit isearch))))
  '(isearch ((t (:background "#aa00aa" :foreground "white" :weight bold))))
- ;; 3. Consult Preview (Linking it to isearch logic)
- '(consult-preview-match ((t (:inherit isearch)))))
+ '(lazy-highlight ((t (:background "#0000aa" :foreground "white" :weight bold)))))
 
 (provide 'init)
 ;;; init.el ends here
+(custom-set-variables
+ ;; custom-set-variables was added by Custom.
+ ;; If you edit it by hand, you could mess it up, so be careful.
+ ;; Your init file should contain only one such instance.
+ ;; If there is more than one, they won't work right.
+ '(package-selected-packages
+   '(which-key yasnippet-snippets yaml-mode wgrep vundo vterm vertico swift-mode smartparens rust-mode rpm-spec-mode projectile orderless marginalia magit lsp-ui kind-icon json-mode helm-rg helm-ls-git go-mode flycheck embark-consult dockerfile-mode dirvish diff-hl debian-el corfu clipetty bazel avy)))

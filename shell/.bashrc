@@ -152,3 +152,10 @@ export HOMEBREW_NO_AUTO_UPDATE="1"
 PATH="$PATH:/usr/sbin:/sbin"
 export PATH
 # Lima END
+# Enable programmable completion features via Homebrew
+if type brew &>/dev/null; then
+  HOMEBREW_PREFIX="$(brew --prefix)"
+  if [[ -r "${HOMEBREW_PREFIX}/etc/profile.d/bash_completion.sh" ]]; then
+    source "${HOMEBREW_PREFIX}/etc/profile.d/bash_completion.sh"
+  fi
+fi

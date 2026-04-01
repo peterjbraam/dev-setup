@@ -4,3 +4,4 @@ docs/*
 emacs/.emacs.d/.cache/*
 emacs/.emacs.d/.lsp-session-v1
 **/*~
+eln-cache
