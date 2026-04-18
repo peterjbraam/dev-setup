@@ -17,9 +17,9 @@ shopt -s globstar 2>/dev/null || true
 
 # --- Prompt (unified: user@host cwd $ or #) ---
 if [[ $EUID -eq 0 ]]; then
-  PS1='\[\e[1;32m\]\u@\h \[\e[1;34m\]\w \[\e[1;31m\]# \[\e[0m\]'
+  PS1='\[\e[1;32m\]A \u@\h \[\e[1;34m\]\w \[\e[1;31m\]# \[\e[0m\]'
 else
-  PS1='\[\e[1;32m\]\u@\h \[\e[1;34m\]\w \[\e[1;31m\]$ \[\e[0m\]'
+  PS1='\[\e[1;32m\]\A \u@\h \[\e[1;34m\]\w \[\e[1;31m\]$ \[\e[0m\]'
 fi
 
 # --- Colors for ls ---
@@ -159,3 +159,4 @@ if type brew &>/dev/null; then
     source "${HOMEBREW_PREFIX}/etc/profile.d/bash_completion.sh"
   fi
 fi
+source <(ggo completion bash)

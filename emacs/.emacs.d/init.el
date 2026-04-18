@@ -38,6 +38,9 @@
 (setq-default indent-tabs-mode nil tab-width 4)
 (load-theme 'wombat t)
 
+;; Modern convenience: typing replaces active region, C-w kills safely
+(delete-selection-mode 1)
+
 (use-package which-key :init (which-key-mode 1))
 
 ;; Mouse Support (xterm)
@@ -56,24 +59,25 @@
   (message "Mouse reset"))
 
 ;; -------------------------------------------------------------------
-;; 3. CLIPBOARD LOGIC (Manual Copy / Auto Paste)
+;; 4. CLIPBOARD LOGIC (Strict OS/Emacs Isolation)
 ;; -------------------------------------------------------------------
 
-;; 1. Force Load Clipetty immediately (so functions are available)
-(use-package clipetty 
-  :ensure t 
-  :demand t)
+;; Keep the GUI visuals, but remove GUI clipboard checks
+(when (display-graphic-p)
+  (set-cursor-color "#FF8C00") 
+  (tab-bar-mode 1)
+  (setq tab-bar-show 1)          
+  (setq tab-bar-new-tab-choice "*scratch*"))
 
-;; 2. Disable standard clipboard sync (Keeps C-k/C-w local and fast)
+(use-package clipetty :ensure t :demand t)
+
+;; 1. C-w ONLY goes to Emacs internal kill-ring (No OS sync)
 (setq interprogram-cut-function nil)
 
-;; 3. Enable auto-pasting (C-y checks system clipboard)
-(setq interprogram-paste-function
-      (lambda ()
-        (when (fboundp 'clipetty-read)
-          (clipetty-read))))
+;; 2. C-y ONLY pulls from Emacs internal kill-ring (No OS sync)
+(setq interprogram-paste-function nil)
 
-;; 4. Explicit Copy to System (M-w only) WITH FALLBACK
+;; 3. Explicit Copy to OS System (M-w only)
 (defun pb/copy-region-and-sync (beg end)
   "Copy region to kill-ring AND sync to system clipboard."
   (interactive "r")
@@ -84,22 +88,17 @@
    (t
     (kill-ring-save beg end)))
   
-  ;; B. System Sync (The Robust Part)
+  ;; B. System Sync (The M-w bridge)
   (cond
-   ;; Option 1: Try Clipetty (Best for Remote/SSH/Docker)
    ((fboundp 'clipetty-copy)
     (clipetty-copy (car kill-ring))
     (message "Copied to System (via Clipetty)."))
-   
-   ;; Option 2: Fallback to pbcopy (Best for Local Mac)
    ((executable-find "pbcopy")
     (let ((process-connection-type nil))
       (let ((proc (start-process "pbcopy" nil "pbcopy")))
         (process-send-string proc (car kill-ring))
         (process-send-eof proc)))
     (message "Copied to System (via pbcopy)."))
-   
-   ;; Option 3: Failure
    (t
     (message "Copied to Ring (System clipboard unavailable)."))))
 
@@ -107,15 +106,15 @@
 ;; 5. CUSTOM FUNCTIONS (Tools & Workflows)
 ;; -------------------------------------------------------------------
 
-;; --- A. Text Manipulation ---
 (defun kill-to-end-of-buffer ()
   (interactive)
   (kill-region (point) (point-max)))
 
 (defun copy-whole-buffer ()
+  "Copy entire buffer to OS system clipboard."
   (interactive)
-  (kill-new (buffer-substring-no-properties (point-min) (point-max)))
-  (message "Entire buffer copied"))
+  (pb/copy-region-and-sync (point-min) (point-max))
+  (message "Entire buffer copied to system clipboard!"))
 
 (defun pb/format-buffer-safely (command args)
   "Run formatter safely without deleting buffer on failure."
@@ -137,95 +136,217 @@
         (message "Format skipped (Error or Empty Output): See *Formatter Errors*")))
     (kill-buffer patch-buf)))
 
-;; --- B. AI Ghost Text (The "Terminal Safe" Version) ---
-(defvar my-ghost-overlay nil "Holds the current AI ghost overlay.")
+;; -------------------------------------------------------------------
+;; 6. GGO IPC INTEGRATION (The AI Chat Terminal)
+;; -------------------------------------------------------------------
+(require 'ansi-color)
 
-(defun my/clear-ghost-text ()
-  "Remove the ghost text if it exists."
+(defun ggo--get-active-project ()
+  (let ((config-file (expand-file-name "~/.ggo/config.yaml")))
+    (if (file-exists-p config-file)
+        (with-temp-buffer
+          (insert-file-contents config-file)
+          (goto-char (point-min))
+          (if (re-search-forward "^last_project:[ \t]*\\(.*?\\)$" nil t)
+              (match-string 1)
+            (error "No last_project found in ggo config.")))
+      (error "ggo config not found."))))
+
+(defun ggo--get-pipe (pipe-name)
+  (let ((proj (ggo--get-active-project)))
+    (expand-file-name (format "~/.ggo/ggoai-%s/run/%s" proj pipe-name))))
+
+(defvar-local ggo-response-process nil)
+(defvar-local ggo-prompt-counter 1)
+
+(defun ggo-start-listener ()
   (interactive)
-  (when (and my-ghost-overlay (overlayp my-ghost-overlay))
-    (delete-overlay my-ghost-overlay)
-    (setq my-ghost-overlay nil)))
+  (let* ((pipe (ggo--get-pipe "response.pipe"))
+         (buf (current-buffer))
+         ;; MAGIC FIX: Force pty to prevent tail output buffering!
+         (process-connection-type t)) 
+    (unless (file-exists-p pipe)
+      (user-error "ggo daemon is not running!"))
+    
+    (when (process-live-p ggo-response-process)
+      (set-process-query-on-exit-flag ggo-response-process nil)
+      (delete-process ggo-response-process))
+    
+    (setq ggo-response-process
+          (make-process
+           :name "ggo-response-listener"
+           :buffer buf
+           :command (list "tail" "-f" pipe)
+           :sentinel (lambda (proc event) nil) 
+           :filter (lambda (proc string)
+                     (when (buffer-live-p (process-buffer proc))
+                       (with-current-buffer (process-buffer proc)
+                         (let ((moving (= (point) (point-max)))
+                               ;; Process daemon ANSI colors
+                               (clean-str (ansi-color-apply string)))
+                           (save-excursion
+                             (goto-char (point-max))
+                             (insert clean-str))
+                           (when moving (goto-char (point-max)))))))))))
 
-(defun ai-demo-ghost-text ()
-  "Display a fake AI prediction at the END of the current line."
+(defun ggo-insert-prompt ()
+  "Insert a bash-like prompt at the bottom of the buffer."
   (interactive)
-  (my/clear-ghost-text)
-  (let* ((line-end (line-end-position))
-         (has-newline (< line-end (point-max))))
-    (if (not has-newline)
-        (message "Add a newline to the end of the file first!")
-      ;; Create overlay on the newline character
-      (setq my-ghost-overlay (make-overlay line-end (1+ line-end)))
-      ;; Replace '\n' with '...prediction...\n'
-      (let ((ghost-string "  <-- [AI says: return True]"))
-        (overlay-put my-ghost-overlay 'display 
-                     (concat (propertize ghost-string 
-                                         'face '(:foreground "#50FA7B" :slant italic)) 
-                             "\n")))
-      ;; Auto-Clear on next keystroke
-      (letrec ((clear-hook 
-                (lambda () 
-                  (my/clear-ghost-text)
-                  (remove-hook 'pre-command-hook clear-hook))))
-        (add-hook 'pre-command-hook clear-hook)))))
+  (goto-char (point-max))
+  (unless (bolp) (insert "\n"))
+  (let* ((proj (ggo--get-active-project))
+         (ts (format-time-string "%H:%M:%S"))
+         ;; Use markdown bold so it looks clean: **proj:10:45 [1]>**
+         (prompt-str (format "\n**%s:%s [%d]>** " proj ts ggo-prompt-counter)))
+    (insert prompt-str)
+    (setq ggo-prompt-counter (1+ ggo-prompt-counter))))
 
-;; --- C. AI Tools (Prompting) ---
-(defun ai-new-prompt ()
-  (interactive)
-  (let* ((buf (get-buffer-create "*ai-prompt*"))
-         (ts (format-time-string "%a %b %d %H:%M:%S %Z %Y")))
-    (switch-to-buffer buf)
-    (erase-buffer)
-    (insert (format "%s  Prompt:\n\n" ts))
-    (markdown-mode)
-    (message "Type prompt, then C-c s to save/copy.")))
-
-(defun ai-append-diff-and-copy ()
-  (interactive)
-  (let* ((context (string-trim (with-temp-buffer (condition-case nil (insert-file-contents "~/.ai-context") (error "")) (buffer-string))))
-         (tempfile (make-temp-file "ai-diff"))
-         (chatlog (concat (expand-file-name "~/ai/") context "-ai/docs/chats/current.txt"))
-         (ts (format-time-string "%a %b %d %H:%M:%S %Z %Y")))
-    (insert (format "\n\n### DIFF (%s)\n\n" ts))
-    (call-process-shell-command (concat "~/scripts/ai-diff.sh > " tempfile))
-    (insert-file-contents tempfile)
-    (when (file-exists-p chatlog)
-      (with-temp-buffer
-        (insert (format "--- %s ---\n" (format-time-string "%Y-%m-%d %H:%M:%S")))
-        (insert-file-contents tempfile)
-        (append-to-file (point-min) (point-max) chatlog)))
-    (kill-new (buffer-string))
-    (delete-file tempfile)
-    (message "Prompt + diff copied to clipboard.")
-    (kill-buffer (current-buffer))))
-
-(defun ai-apply-patch-from-clipboard ()
-  (interactive)
-  (let* ((patch-text (shell-command-to-string "pbpaste"))
-         (patch-buf (generate-new-buffer "*AI Patch*")))
-    (if (or (not patch-text) (string-empty-p patch-text))
-        (message "Clipboard is empty.")
-      (with-current-buffer patch-buf (insert patch-text) (goto-char (point-min)))
-      (ediff-patch-buffer patch-buf nil t)
-      (add-hook 'ediff-quit-hook (lambda () (when (buffer-live-p patch-buf) (kill-buffer patch-buf))) nil t))))
-
-(defun pb/send-prompt-to-brave ()
-  (interactive)
-  (let ((prompt-text (pb/get-current-prompt-text)))
-    (if (string-empty-p prompt-text)
-        (message "No prompt found!")
-      (kill-new prompt-text)
-      (call-process-shell-command "osascript ~/scripts/send-to-gemini.scpt")
-      (message "Prompt sent to Gemini."))))
-
-(defun pb/get-current-prompt-text ()
+(defun ggo-get-current-prompt-text ()
   (save-excursion
-    (let ((end (point))
-          (beg (progn (if (re-search-backward "^---" nil t) (line-beginning-position 2) (point-min)))))
-      (string-trim (buffer-substring-no-properties beg end)))))
+    (let ((end (point-max)))
+      ;; Search backwards for the prompt marker
+      (if (re-search-backward "\\*\\*.*?>\\*\\*[ \t]*" nil t)
+          (progn
+            (goto-char (match-end 0))
+            (string-trim (buffer-substring-no-properties (point) end)))
+        ""))))
 
-;; --- D. Review Workflow (F5-F8) ---
+(defun ggo-send-prompt ()
+  (interactive)
+  (let ((input-text (ggo-get-current-prompt-text)))
+    (if (string-empty-p input-text)
+        (message "Input is empty!")
+      
+      (goto-char (point-max))
+      (insert "\n") ;; Let the daemon provide the response formatting
+      
+      (if (string-prefix-p "/" input-text)
+          (let ((cmd-string (substring input-text 1))
+                (pipe (ggo--get-pipe "control.pipe")))
+            (write-region (concat cmd-string "\n") nil pipe 'append)
+            (message "Command sent."))
+        
+        (let ((pipe (ggo--get-pipe "prompt.pipe")))
+          (write-region (concat input-text "\n") nil pipe 'append)
+          (message "Prompt sent."))))))
+
+(defun ggo-control-send (cmd-string)
+  (let ((pipe (ggo--get-pipe "control.pipe")))
+    (write-region (concat cmd-string "\n") nil pipe 'append)))
+
+(defun ggo-write-files () (interactive) (ggo-control-send "WF"))
+
+(defun ggo-abort-and-prompt ()
+  "Send ABORT signal to daemon and instantly drop a new prompt."
+  (interactive)
+  (ggo-control-send "ABORT")
+  (ggo-insert-prompt))
+
+(define-derived-mode ggo-chat-mode markdown-mode "ggo-chat"
+  (ggo-start-listener)
+  (add-hook 'kill-buffer-hook 
+            (lambda ()
+              (when (process-live-p ggo-response-process)
+                (delete-process ggo-response-process)))
+            nil t))
+
+(define-key ggo-chat-mode-map (kbd "C-c C-c") 'ggo-send-prompt)
+(define-key ggo-chat-mode-map (kbd "C-c C-w") 'ggo-write-files)
+(define-key ggo-chat-mode-map (kbd "C-c C-k") 'ggo-abort-and-prompt)
+(define-key ggo-chat-mode-map (kbd "RET")
+  (lambda () 
+    (interactive) 
+    (if (and (= (point) (point-max)) (not (string-empty-p (ggo-get-current-prompt-text))))
+        (ggo-send-prompt)
+      (newline))))
+
+(defun ggo-new-chat ()
+  (interactive)
+  (let* ((proj (ggo--get-active-project))
+         (chat-file (expand-file-name (format "~/.ggo/ggoai-%s/current-chat.md" proj))))
+    ;; Just open the file normally. Emacs will auto-detect Markdown mode.
+    (find-file chat-file)
+    (unless (eq major-mode 'ggo-chat-mode)
+      (ggo-chat-mode))
+    (when (= (buffer-size) 0)
+      (let ((ts (format-time-string "%Y-%m-%d %H:%M:%S")))
+        (insert (format "# ggo Chat\n*Project: %s*\n*Started: %s*\n\n---\n" proj ts))))
+    ;; Only insert a prompt if we are at the bottom of the file
+    (when (= (point) (point-max))
+      (ggo-insert-prompt))
+    (message "Type a prompt or /command, then press C-c C-c (or Return at end of line).")))
+
+(defun ggo-jump-to-chat ()
+  (interactive)
+  (let* ((has-region (use-region-p))
+         (selected-text (when has-region (buffer-substring-no-properties (region-beginning) (region-end))))
+         (filename (when buffer-file-name (file-name-nondirectory buffer-file-name))))
+    
+    (if has-region
+        (progn
+          (setq ggo--target-beg (set-marker (make-marker) (region-beginning)))
+          (setq ggo--target-end (set-marker (make-marker) (region-end)))
+          (deactivate-mark))
+      (progn
+        (setq ggo--target-beg (set-marker (make-marker) (point-min)))
+        (setq ggo--target-end (set-marker (make-marker) (point-max)))))
+    
+    ;; Use the new function to jump safely
+    (ggo-new-chat)
+    
+    (when (and has-region filename)
+      (goto-char (point-max))
+      (insert (format "\nRegarding `%s`:\n```text\n%s\n```\n" filename selected-text)))
+    
+    (ggo-insert-prompt)
+    (message "Ready to prompt!")))
+
+
+(defun ggo-ediff-clipboard ()
+  (interactive)
+  (let* ((clip-text (string-trim (shell-command-to-string "pbpaste")))
+         (target-buf (current-buffer))
+         (m-beg (if (and (boundp 'ggo--target-beg) (markerp ggo--target-beg))
+                    ggo--target-beg
+                  (set-marker (make-marker) (if (use-region-p) (region-beginning) (point-min)))))
+         (m-end (if (and (boundp 'ggo--target-end) (markerp ggo--target-end))
+                    ggo--target-end
+                  (set-marker (make-marker) (if (use-region-p) (region-end) (point-max)))))
+         (orig-text (buffer-substring-no-properties m-beg m-end))
+         (orig-buf (generate-new-buffer "*ggo-original*"))
+         (clip-buf (generate-new-buffer "*ggo-clipboard*")))
+    
+    (if (string-empty-p clip-text)
+        (user-error "Clipboard is empty! Did the LLM output a code block?")
+      (with-current-buffer orig-buf
+        (insert orig-text)
+        (funcall (buffer-local-value 'major-mode target-buf)))
+      (with-current-buffer clip-buf
+        (insert clip-text)
+        (funcall (buffer-local-value 'major-mode target-buf)))
+      (when (use-region-p) (deactivate-mark))
+      (ediff-buffers orig-buf clip-buf
+                     `((lambda ()
+                         (add-hook 'ediff-quit-hook
+                                   (lambda ()
+                                     (let ((final-text (with-current-buffer ,orig-buf (buffer-string))))
+                                       (with-current-buffer ,target-buf
+                                         (delete-region ,m-beg ,m-end)
+                                         (save-excursion
+                                            (goto-char ,m-beg)
+                                            (insert final-text)))
+                                       (kill-buffer ,orig-buf)
+                                       (kill-buffer ,clip-buf)
+                                       (set-marker ,m-beg nil)
+                                       (set-marker ,m-end nil)
+                                       (message "Snippet merged!")))
+                                   nil 'local)))))))
+
+
+;; -------------------------------------------------------------------
+;; 7. REVIEW & BACKUP WORKFLOWS
+;; -------------------------------------------------------------------
+
 (defun my/delete-note-and-next ()
   "INSTANTLY trash current file, kill buffer, and jump to next result."
   (interactive)
@@ -233,98 +354,186 @@
         (current-buf (current-buffer)))
     (if (not filename)
         (message "Buffer is not visiting a file!")
-      ;; 1. Trash the file (No confirmation!)
       (move-file-to-trash filename)
       (message "Trashed: %s" (file-name-nondirectory filename))
-      ;; 2. Jump to next note in the list
       (condition-case nil
           (next-error)
         (error (message "End of list!")))
-      ;; 3. Kill the old buffer
       (kill-buffer current-buf))))
 
-;; --- E. Smart Backups & Timeline ---
 (global-auto-revert-mode 1)
 (setq global-auto-revert-non-file-buffers t)
 (auto-save-visited-mode 1)
-(setq auto-save-visited-interval 2)
+(setq auto-save-visited-interval 1)
 (setq make-backup-files nil create-lockfiles nil)
 
-(defvar my-smart-backup-dir (expand-file-name "~/.emacs.d/timebackups/"))
 
+;; -------------------------------------------------------------------
+;; 7b . TIME MACHINE & BACKUP WORKFLOWS
+;; -------------------------------------------------------------------
+
+(defvar my-time-machine-dir (expand-file-name "~/.emacs.d/timebackups/"))
+
+;; Background Saver (Unchanged)
 (defun my-smart-backup ()
   (when (and buffer-file-name (file-writable-p buffer-file-name))
     (let ((min (string-to-number (format-time-string "%M"))))
-      ;; Simple logic: Backup if minute is even (every 2 mins)
       (when (zerop (% min 2))
-        (make-directory my-smart-backup-dir t)
+        (make-directory my-time-machine-dir t)
         (let* ((file (file-name-nondirectory buffer-file-name))
                (stamp (format-time-string "%Y-%m-%d-%H:%M:%S"))
-               (target (expand-file-name (format "%s.%s" file stamp) my-smart-backup-dir)))
+               (target (expand-file-name (format "%s.%s" file stamp) my-time-machine-dir)))
           (copy-file buffer-file-name target t))))))
 
 (run-with-timer 10 60 (lambda () (save-excursion (dolist (buf (buffer-list)) (with-current-buffer buf (when (buffer-file-name) (my-smart-backup)))))))
 
-;; Backup Timeline UI
-(define-derived-mode backup-timeline-mode special-mode "BackupTimeline" (setq truncate-lines t))
-(defun my-backup-timeline ()
+;; --- The Time Machine Engine ---
+
+(defun tm--relative-time (mtime)
+  "Convert modification time to a readable relative string (-5m, -2h)."
+  (let* ((diff (float-time (time-subtract (current-time) mtime)))
+         (mins (round (/ diff 60.0))))
+    (cond
+     ((< mins 60) (format "-%dm" mins))
+     ((< mins 1440) (format "-%dh" (round (/ mins 60.0))))
+     (t (format "-%dd" (round (/ mins 1440.0)))))))
+
+(define-derived-mode time-machine-mode special-mode "TimeMachine"
+  "Major mode for navigating backup timelines, mirroring vundo UX."
+  (setq truncate-lines t)
+  (setq cursor-type 'box))
+
+;; State Variables
+(defvar-local tm--target-file nil)
+(defvar-local tm--target-buf nil)
+(defvar-local tm--diff-buf nil)
+(defvar-local tm--auto-save-state nil)
+
+(defun tm-quit ()
+  "Quit the time machine, clean up diffs, and restore auto-save."
   (interactive)
-  (unless buffer-file-name (user-error "No file"))
-  (let* ((target (expand-file-name buffer-file-name))
+  (when tm--auto-save-state
+    (with-current-buffer tm--target-buf
+      (auto-save-visited-mode 1)
+      (message "Time Machine closed. Auto-save resumed.")))
+  (when (buffer-live-p tm--diff-buf) (kill-buffer tm--diff-buf))
+  (kill-buffer (current-buffer)))
+
+(defun tm--get-current-backup-file ()
+  "Extract the backup filename from the current line."
+  (let ((line (thing-at-point 'line t)))
+    (if (and line (string-match "^\\(.*?\\) \\(" line))
+        (expand-file-name (match-string 1 line) my-time-machine-dir)
+      nil)))
+
+(defun tm-show-diff ()
+  "Show unified diff for the current line's backup."
+  (interactive)
+  (let ((backup (tm--get-current-backup-file)))
+    (when (and backup (file-exists-p backup))
+      (when (buffer-live-p tm--diff-buf) (kill-buffer tm--diff-buf))
+      (setq tm--diff-buf (get-buffer-create "*Time Machine Diff*"))
+      (with-current-buffer tm--diff-buf
+        (erase-buffer)
+        (insert (shell-command-to-string (format "diff -u %s %s" backup tm--target-file)))
+        (diff-mode))
+      (display-buffer tm--diff-buf '((display-buffer-at-bottom))))))
+
+(defun tm-ediff ()
+  "Launch Ediff for the selected backup."
+  (interactive)
+  (let ((backup (tm--get-current-backup-file))
+        (orig-buf tm--target-buf)
+        (auto-state tm--auto-save-state)
+        (tm-buf (current-buffer)))
+    (when (and backup (file-exists-p backup))
+      (when (buffer-live-p tm--diff-buf) (kill-buffer tm--diff-buf))
+      ;; Ediff order: Backup is 'A', Current is 'B'. 
+      ;; Pressing 'a' in Ediff pulls the old code into the present.
+      (ediff-files backup tm--target-file)
+      ;; Clean up when Ediff finishes
+      (add-hook 'ediff-quit-hook
+                `(lambda ()
+                   (when ,auto-state
+                     (with-current-buffer ,orig-buf
+                       (auto-save-visited-mode 1)
+                       (message "Ediff merged. Auto-save resumed.")))
+                   (when (buffer-live-p ,tm-buf) (kill-buffer ,tm-buf)))
+                nil t))))
+
+;; The UX Keybindings (Identical to Vundo logic)
+(define-key time-machine-mode-map (kbd "n") 'next-line)
+(define-key time-machine-mode-map (kbd "p") 'previous-line)
+(define-key time-machine-mode-map (kbd "d") 'tm-show-diff)
+(define-key time-machine-mode-map (kbd "RET") 'tm-ediff)
+(define-key time-machine-mode-map (kbd "q") 'tm-quit)
+
+(defun my-time-machine ()
+  "Launch the disk-based Time Machine for the current buffer."
+  (interactive)
+  (unless buffer-file-name (user-error "Not visiting a file!"))
+  (let* ((target buffer-file-name)
+         (buf (current-buffer))
          (filename (file-name-nondirectory target))
-         (backups (sort (directory-files my-smart-backup-dir t (concat "^" (regexp-quote filename) "\\.")) #'string<))
-         (buf (get-buffer-create "*Backup Timeline*")))
-    (with-current-buffer buf
-      (setq buffer-read-only nil) (erase-buffer)
-      (setq-local backup-timeline--target target)
-      (setq-local backup-timeline--dir my-smart-backup-dir)
-      (insert (format "Backups for: %s\n\n" filename))
-      (dolist (f backups) (insert (file-name-nondirectory f) "\n"))
-      (backup-timeline-mode))
-    (pop-to-buffer buf)))
+         (auto-save-was-on (bound-and-true-p auto-save-visited-mode))
+         (backups (sort (directory-files my-time-machine-dir t (concat "^" (regexp-quote filename) "\\.")) #'string>))
+         (tm-buf (get-buffer-create "*Time Machine*")))
+    
+    (unless backups (user-error "No backups found for %s" filename))
+    
+    ;; 1. PAUSE TIME: Stop auto-save immediately.
+    (when auto-save-was-on
+      (auto-save-visited-mode -1)
+      (message "Time Machine active. Auto-save paused."))
 
-(defun backup-timeline-preview ()
-  (interactive)
-  (let ((file (expand-file-name (string-trim (thing-at-point 'line t)) backup-timeline--dir)))
-    (when (file-exists-p file) (ediff-files backup-timeline--target file))))
+    ;; 2. BUILD THE UI
+    (with-current-buffer tm-buf
+      (setq buffer-read-only nil)
+      (erase-buffer)
+      (setq-local tm--target-file target)
+      (setq-local tm--target-buf buf)
+      (setq-local tm--auto-save-state auto-save-was-on)
+      
+      (insert (format "=== TIME MACHINE: %s ===\n" filename))
+      (insert "[n/p] Navigate | [d] Live Diff | [RET] Extract via Ediff | [q] Quit\n\n")
+      
+      (dolist (f backups)
+        (let* ((attrs (file-attributes f))
+               (mtime (file-attribute-modification-time attrs)))
+          (insert (format "%s  (%s)\n" (file-name-nondirectory f) (tm--relative-time mtime)))))
+      
+      (time-machine-mode)
+      (goto-char (point-min))
+      (forward-line 3)) ;; Jump to first backup
+    (pop-to-buffer tm-buf)))
 
-(defun my-backup-restore ()
-  (interactive)
-  (my-backup-timeline))
-
-(define-key backup-timeline-mode-map (kbd "RET") #'backup-timeline-restore)
-(define-key backup-timeline-mode-map (kbd "<down>") (lambda () (interactive) (forward-line 1) (backup-timeline-preview)))
-(define-key backup-timeline-mode-map (kbd "<up>") (lambda () (interactive) (forward-line -1) (backup-timeline-preview)))
-
+(global-set-key (kbd "C-c t") 'my-time-machine)
 
 ;; -------------------------------------------------------------------
-;; 6. PACKAGE CONFIGURATION
+;; 8. PACKAGE CONFIGURATION
 ;; -------------------------------------------------------------------
 
-;; --- Navigation (Vertico/Consult) ---
+(add-hook 'makefile-mode-hook (lambda () (setq indent-tabs-mode t)))
+(add-hook 'makefile-bsdmake-mode-hook (lambda () (setq indent-tabs-mode t)))
+
 (use-package orderless
   :custom
   (completion-styles '(orderless basic))
   (completion-category-defaults nil)
-  ;; Fix "Bonkers" file editing by using basic matching for files
   (completion-category-overrides '((file (styles basic partial-completion)))))
 
-(use-package vertico
-  :init (vertico-mode 1)
-  :custom (vertico-cycle t))
+(use-package vertico 
+  :init (vertico-mode 1) 
+  :custom (vertico-cycle t)
+)
 
+(add-to-list 'completion-ignored-extensions ".DS_Store")
 (use-package consult
   :config
-  ;; Fix sort order for Note Review (Chronological)
-  (setq consult-ripgrep-args
-        "rg --null --line-buffered --color=never --max-columns=1000 --path-separator /   --smart-case --no-heading --with-filename --line-number --search-zip --sort path"))
+  (setq consult-ripgrep-args "rg --null --line-buffered --color=never --max-columns=1000 --path-separator /   --smart-case --no-heading --with-filename --line-number --search-zip --sort path"))
 
-(use-package embark
-  :init (setq prefix-help-command #'embark-prefix-help-command))
-
-(use-package embark-consult
-  :hook (embark-collect-mode . consult-preview-at-point-mode))
-
+(use-package embark :init (setq prefix-help-command #'embark-prefix-help-command))
+(use-package embark-consult :hook (embark-collect-mode . consult-preview-at-point-mode))
 (use-package marginalia :init (marginalia-mode 1))
 
 (use-package dirvish
@@ -334,7 +543,6 @@
 
 (use-package projectile :init (projectile-mode 1))
 
-;; --- Editing & Git ---
 (use-package vundo :config (setq vundo-glyph-alist vundo-unicode-symbols))
 (use-package smartparens :hook (prog-mode . smartparens-mode))
 (use-package yasnippet :init (yas-global-mode 1))
@@ -344,41 +552,41 @@
 (use-package diff-hl :hook (prog-mode . diff-hl-mode))
 (use-package vterm :when (not (eq system-type 'windows-nt)))
 
-;; --- Languages (LSP) ---
 (use-package lsp-mode
   :commands (lsp lsp-deferred)
   :custom
   (lsp-completion-provider :none)
-  (lsp-enable-on-type-formatting nil)) ;; Disable aggressive auto-format
+  (lsp-enable-on-type-formatting nil))
 
 (use-package lsp-ui :commands lsp-ui-mode)
 (use-package flycheck :init (global-flycheck-mode 1))
 (use-package corfu :init (global-corfu-mode 1) :custom (corfu-auto t))
 
-;; Markdown
 (use-package markdown-mode
   :mode ("\\.md\\'" . markdown-mode)
-  :hook (markdown-mode . lsp-deferred))
+  :hook (markdown-mode . (lambda ()
+                           (setq-local corfu-auto nil)
+                           (flyspell-mode 1)
+                           (visual-line-mode 1)))) ;; <-- The modern soft-wrap magic
 
-;; Go
+
 (use-package go-mode
   :mode "\\.go\\'"
   :hook ((go-mode . lsp-deferred)
          (go-mode . (lambda () (add-hook 'before-save-hook #'pb/go-format-buffer nil t)))))
+
 (defun pb/go-format-buffer ()
   (interactive)
   (when (eq major-mode 'go-mode)
     (cond ((executable-find "goimports") (pb/format-buffer-safely "goimports" nil))
           ((executable-find "gofmt") (pb/format-buffer-safely "gofmt" nil)))))
 
-;; Misc Languages
 (use-package json-mode :hook (json-mode . lsp-deferred))
 (use-package yaml-mode :hook (yaml-mode . lsp-deferred))
 (use-package rust-mode :hook (rust-mode . lsp))
 (use-package dockerfile-mode :mode "\\.docker\\'")
 
 (defun my/find-obsidian-vault-root (start-path)
-  "Walk up the directory tree to find the folder containing '.obsidian'."
   (let ((current-dir (file-name-directory start-path)))
     (while (and current-dir
                 (not (file-exists-p (concat current-dir ".obsidian")))
@@ -387,100 +595,73 @@
     (if (equal current-dir "/") nil current-dir)))
 
 (defun my/open-in-obsidian ()
-  "Open the current Markdown buffer in Obsidian."
   (interactive)
-  (unless buffer-file-name
-    (user-error "Buffer is not visiting a file"))
-  
+  (unless buffer-file-name (user-error "Buffer is not visiting a file"))
   (let* ((file-path (expand-file-name buffer-file-name))
          (vault-root (my/find-obsidian-vault-root file-path)))
-    
-    (unless vault-root
-      (user-error "Current file is not inside an Obsidian Vault (no .obsidian folder found)."))
-    
+    (unless vault-root (user-error "Current file is not inside an Obsidian Vault."))
     (let* ((vault-name (file-name-nondirectory (directory-file-name vault-root)))
-           ;; Calculate path relative to the vault root
            (rel-path (file-relative-name file-path vault-root))
-           ;; Construct the URI: obsidian://open?vault=NAME&file=PATH
            (uri (format "obsidian://open?vault=%s&file=%s"
                         (url-hexify-string vault-name)
                         (url-hexify-string rel-path))))
-      
       (message "Opening in Obsidian: %s..." rel-path)
-      ;; On macOS, browse-url calls 'open', which handles custom URI schemes correctly
       (browse-url uri))))
 
-;; Bind it to a key (e.g., C-c o)
 (global-set-key (kbd "C-c o") 'my/open-in-obsidian)
 
 ;; -------------------------------------------------------------------
-;; 7. GLOBAL KEYBINDINGS (The Grand Scheme)
+;; 9. GLOBAL KEYBINDINGS
 ;; -------------------------------------------------------------------
 
-;; --- A. Navigation & Search ---
-(global-set-key (kbd "C-s")     #'isearch-forward)      ; Standard "Flashlight" Search
-(global-set-key (kbd "C-r")     #'isearch-backward)     ; Reverse "Flashlight" Search
-(global-set-key (kbd "M-s l")   'consult-line)          ; Search current buffer (List view)
-(global-set-key (kbd "M-s r")   'consult-ripgrep)       ; Search Project (Grep)
-(global-set-key (kbd "C-c r")   'consult-ripgrep)       ; Search Project (Review Workflow)
-(global-set-key (kbd "C-c f")   'consult-fd)            ; Find File (Fast)
-(global-set-key (kbd "C-x b")   'consult-buffer)        ; Switch Buffer (Enhanced)
-(global-set-key (kbd "M-g g")   'consult-goto-line)     ; Go to Line (Live Preview)
-(global-set-key (kbd "M-y")     'consult-yank-pop)      ; Clipboard History
+(global-set-key (kbd "C-s")     #'isearch-forward)
+(global-set-key (kbd "C-r")     #'isearch-backward)
+(global-set-key (kbd "M-s l")   'consult-line)
+(global-set-key (kbd "M-s r")   'consult-ripgrep)
+(global-set-key (kbd "C-c r")   'consult-ripgrep)
+(global-set-key (kbd "C-c f")   'consult-fd)
+(global-set-key (kbd "C-x b")   'consult-buffer)
+(global-set-key (kbd "M-g g")   'consult-goto-line)
+(global-set-key (kbd "M-y")     'consult-yank-pop)
 
-;; --- B. Embark (The "Right Click") ---
-(global-set-key (kbd "C-.")     'embark-act)            ; Action Menu (Export, etc)
-(global-set-key (kbd "C-;")     'embark-dwim)           ; Do What I Mean
+(global-set-key (kbd "C-.")     'embark-act)
+(global-set-key (kbd "C-;")     'embark-dwim)
 
-;; --- C. Review Workflow (F-Keys) ---
-(global-set-key (kbd "<f5>")    'previous-error)          ; Back (Previous Note)
-(global-set-key (kbd "<f6>")    'next-error)              ; Next (Next Note)
-(global-set-key (kbd "<f7>")    'my/delete-note-and-next) ; TRASH note & Auto-Next
-(global-set-key (kbd "<f8>")    'compile)                 ; Compile
+(global-set-key (kbd "<f5>")    'previous-error)
+(global-set-key (kbd "<f6>")    'next-error)
+(global-set-key (kbd "<f7>")    'my/delete-note-and-next)
+(global-set-key (kbd "<f8>")    'compile)
 
-;; --- D. AI Tools ---
-(global-set-key (kbd "C-c q")   'ai-new-prompt)               ; New Prompt Buffer
-(global-set-key (kbd "C-c s")   'ai-append-diff-and-copy)     ; Save Prompt & Diff
-(global-set-key (kbd "C-c P")   'ai-apply-patch-from-clipboard) ; Apply Patch
-(global-set-key (kbd "C-c g")   'pb/send-prompt-to-brave)     ; Send to Gemini
-;; ** NEW **
-(global-set-key (kbd "C-c TAB") 'ai-demo-ghost-text)          ; Show Fake Ghost Text
+;; ggo bindings
+(global-set-key (kbd "C-c c") 'ggo-jump-to-chat)
+(global-set-key (kbd "C-c e") 'ggo-ediff-clipboard)
 
-;; --- E. Editing & Buffer Management ---
-(global-set-key (kbd "M-w")     'pb/copy-region-and-sync)     ; Smart Copy (to System)
-(global-set-key (kbd "C-c k")   'kill-to-end-of-buffer)       ; Kill rest of buffer
-(global-set-key (kbd "C-c a")   'copy-whole-buffer)           ; Copy all
-(global-set-key (kbd "C-x u")   'vundo)                       ; Undo Tree
-(global-set-key (kbd "C-:")     'avy-goto-char)               ; Teleport to Char
-(global-set-key (kbd "C-'")     'avy-goto-line)               ; Teleport to Line (Visible)
+(global-set-key (kbd "M-w")     'pb/copy-region-and-sync)
+(global-set-key (kbd "C-c k")   'kill-to-end-of-buffer)
+(global-set-key (kbd "C-c a")   'copy-whole-buffer)
+(global-set-key (kbd "C-x u")   'vundo)
+(global-set-key (kbd "C-:")     'avy-goto-char)
+(global-set-key (kbd "C-'")     'avy-goto-line)
 
-;; --- F. System & Git ---
-(global-set-key (kbd "C-c m")   'pb/reset-mouse)              ; Reset Mouse
-(global-set-key (kbd "C-x g")   'magit-status)                ; Git Status
-(global-set-key (kbd "C-c t")   'my-backup-timeline)          ; Time Travel Backups
-(global-set-key (kbd "C-c b")   'my-backup-restore)           ; Restore Backups
+(global-set-key (kbd "C-c m")   'pb/reset-mouse)
+(global-set-key (kbd "C-x g")   'magit-status)
+(global-set-key (kbd "C-c t")   'my-backup-timeline)
+(global-set-key (kbd "C-c b")   'my-backup-restore)
 
-;; --- G. Cleanup ---
 (global-set-key (kbd "C-x C-c") 'kill-emacs)
 (defun my/disable-process-query ()
   (dolist (proc (process-list)) (set-process-query-on-exit-flag proc nil)))
 (add-hook 'kill-emacs-hook #'my/disable-process-query)
 
 (custom-set-faces
- ;; custom-set-faces was added by Custom.
- ;; If you edit it by hand, you could mess it up, so be careful.
- ;; Your init file should contain only one such instance.
- ;; If there is more than one, they won't work right.
  '(consult-preview-match ((t (:inherit isearch))))
  '(isearch ((t (:background "#aa00aa" :foreground "white" :weight bold))))
  '(lazy-highlight ((t (:background "#0000aa" :foreground "white" :weight bold)))))
+(set-face-attribute 'region nil :background "#FFE4B5" :foreground "#000000")
+
 
 (provide 'init)
-;;; init.el ends here
 (custom-set-variables
- ;; custom-set-variables was added by Custom.
- ;; If you edit it by hand, you could mess it up, so be careful.
- ;; Your init file should contain only one such instance.
- ;; If there is more than one, they won't work right.
  '(package-selected-packages
    '(which-key yasnippet-snippets yaml-mode wgrep vundo vterm vertico swift-mode smartparens rust-mode rpm-spec-mode projectile orderless marginalia magit lsp-ui kind-icon json-mode helm-rg helm-ls-git go-mode flycheck embark-consult dockerfile-mode dirvish diff-hl debian-el corfu clipetty bazel avy)))
+;;; init.el ends here
