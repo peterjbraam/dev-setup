@@ -54,3 +54,10 @@ vmap <Leader>p "+p
 
 " --- Colorscheme ---
 colorscheme koehler
+
+" --- Filetype specific overrides ---
+" Enable filetype detection, plugins, and indenting
+filetype plugin indent on
+
+" Override global expandtab for Makefiles (mandate hard tabs)
+autocmd FileType make setlocal noexpandtab shiftwidth=8 softtabstop=0
